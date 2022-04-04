@@ -11,6 +11,11 @@ target Rust {
     single-file-project: true,
     build-type: Release,
     cargo-features: ["cli"],
+    cargo-dependencies: {
+        reactor_rt: {
+            features: ["parallel-runtime"]
+        },
+    },
 };
 
 import BenchmarkRunner from "../lib/BenchmarkRunner.lf";
@@ -18,15 +23,15 @@ import BenchmarkRunner from "../lib/BenchmarkRunner.lf";
 reactor Ping(count: usize(40000)) {
     state count(count);
     state pings_left: usize(0);
-    
+
     input inStart: unit;
     output outFinished: unit;
-    
+
     output outPing: unit;
     input inPong: unit;
 
     logical action serve;
-    
+
     reaction(inStart) -> serve {=
         // reset local state
         self.pings_left = self.count;
@@ -51,22 +56,22 @@ reactor Ping(count: usize(40000)) {
 reactor Pong {
     input inPing: unit;
     output outPong: unit;
-    
+
     reaction(inPing) -> outPong {=
-        ctx.set(outPong, ());   
+        ctx.set(outPong, ());
     =}
 }
 
 main reactor (num_iterations:usize(12), count:usize(40000)) {
     state num_iterations(num_iterations);
     state count(count);
-    
+
     ping = new Ping(count=count);
     runner = new BenchmarkRunner(num_iterations=num_iterations);
-    
+
     runner.start -> ping.inStart;
     ping.outFinished -> runner.finished;
-    
+
     reaction(startup) {=
         print_benchmark_info("PingPongBenchmark");
         print_args!(
@@ -77,12 +82,12 @@ main reactor (num_iterations:usize(12), count:usize(40000)) {
         );
         print_system_info();
     =}
-    
+
     pong = new Pong();
-    
+
     ping.outPing -> pong.inPing;
     pong.outPong -> ping.inPong;
-    
+
     preamble {=
         use crate::{print_args,reactors::benchmark_runner::{print_system_info, print_benchmark_info}};
     =}

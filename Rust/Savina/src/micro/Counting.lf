@@ -15,6 +15,11 @@
 target Rust {
     build-type: Release,
     cargo-features: ["cli"],
+    cargo-dependencies: {
+        reactor_rt: {
+            features: ["parallel-runtime"]
+        },
+    },
 };
 
 import BenchmarkRunner from "../lib/BenchmarkRunner.lf";
@@ -67,9 +72,9 @@ reactor CountingReactor {
     input inIncrement: unit;
     input inRetrieveResult: unit;
     output outSendResult: u32;
-    
+
     state count: u32(0);
-    
+
     reaction(inReset) {=
         self.count = 0;
     =}
@@ -85,13 +90,13 @@ reactor CountingReactor {
 main reactor (num_iterations: usize(12), count_to: u32(1000000)) {
     state num_iterations(num_iterations);
     state count_to(count_to);
-    
+
     producer = new ProducerReactor(count_to = count_to);
     runner = new BenchmarkRunner(num_iterations=num_iterations);
-    
+
     runner.start -> producer.inStartCounting;
     producer.outFinishedCounting -> runner.finished;
-    
+
     reaction(startup) {=
         print_benchmark_info("CountingBenchmark");
         print_args!(
@@ -102,14 +107,14 @@ main reactor (num_iterations: usize(12), count_to: u32(1000000)) {
         );
         print_system_info();
     =}
-    
+
     counter = new CountingReactor();
-    
+
     producer.outIncrement -> counter.inIncrement;
     producer.outResetCounter -> counter.inReset;
     producer.outRetrieveResult -> counter.inRetrieveResult;
     counter.outSendResult -> producer.inResult;
-    
+
     preamble {=
         use crate::{print_args,reactors::benchmark_runner::{print_system_info, print_benchmark_info}};
     =}

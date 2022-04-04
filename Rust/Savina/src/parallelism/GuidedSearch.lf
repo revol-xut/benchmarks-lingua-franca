@@ -1,6 +1,6 @@
 /**
  * Copyright (C) 2020 TU Dresden
- * 
+ *
  * This benchmarks is supposed to implement an A*-search through a grid.
  * However, it appears that the Savina implementation is incomplete and does not
  * correctly implement A*. A key component of A* is cost estimation, which helps
@@ -52,12 +52,12 @@
  * multi-threaded executions have the tendency to perform much more work as
  * compared to single threaded execution. This is likely due to the race-conditions
  * mentioned before.
- *  
+ *
  * @author Christian Menard
  * @author Hannes Klein
  * @author Johannes Hayeß
  */
- 
+
  target Rust {
     build-type: Release,
     cargo-features: [ "cli" ],
@@ -70,6 +70,9 @@
             version: "0.8",
             features: ["small_rng"],
         },
+        reactor_rt: {
+            features: ["parallel-runtime"]
+        },
     }
 };
 
@@ -81,39 +84,39 @@ reactor Manager(numWorkers: usize(20), gridSize: u32(30), priorities: u32(30)) {
     state grid: Arc<RwLock<Grid>>({=Arc::new(RwLock::new(Grid::new(gridSize, priorities)))=});
     state nodesToVisit: VecDeque<u32>;
     state pathWasFound: bool(false);
-    
+
     input start: unit;
     output finished: unit;
     output gridShare: Arc<RwLock<Grid>>;
-    
+
     output[numWorkers] search: WorkMessage;
     input[numWorkers] pathFound: unit;
     input[numWorkers] moreNodesToVisit: VecDeque<u32>;
-    
+
     logical action next;
-    
+
     preamble {=
         use crate::guided_search::{Grid, GridNode, WorkMessage};
-        
+
         use std::sync::{RwLock, Arc};
         use std::collections::VecDeque;
     =}
-    
+
     reaction(startup) -> gridShare {=
         ctx.set(gridShare, self.grid.clone());
     =}
-    
+
     reaction (start) -> next {=
         let mut gw = self.grid.write().unwrap();
         gw.initialize_data(); // reset the grid
         self.nodesToVisit.clear();
         self.pathWasFound = false;
-        
+
         // start execution, first visit the origin node
         self.nodesToVisit.push_back(gw.get_origin_node_id());
         ctx.schedule(next, Asap);
     =}
-    
+
     reaction (next) -> next, search {=
         // abort if path was found
         if !self.pathWasFound {
@@ -121,7 +124,7 @@ reactor Manager(numWorkers: usize(20), gridSize: u32(30), priorities: u32(30)) {
             let mut worker_index = 0;
             let target_node_id = {
                 let gr = self.grid.read().unwrap();
-                gr.target_node_id()  
+                gr.target_node_id()
             };
             while let Some(start_node) = self.nodesToVisit.pop_front() {
                 if worker_index >= self.num_workers {
@@ -130,12 +133,12 @@ reactor Manager(numWorkers: usize(20), gridSize: u32(30), priorities: u32(30)) {
                 ctx.set(search.get(worker_index as usize), WorkMessage::new(start_node, target_node_id));
                 worker_index += 1;
             }
-            
+
              // continue with the next iteration
-             ctx.schedule(next, Asap);    
+             ctx.schedule(next, Asap);
          }
     =}
-    
+
     reaction(pathFound) -> finished {=
         self.pathWasFound = true;
         let gr = self.grid.read().unwrap();
@@ -144,7 +147,7 @@ reactor Manager(numWorkers: usize(20), gridSize: u32(30), priorities: u32(30)) {
         info!("Result valid: {}", valid);
         ctx.set(finished, ());
     =}
-    
+
     reaction (moreNodesToVisit) {=
         // collect more nodes to visit from all workers and store them in the internal queue
         for port in moreNodesToVisit {
@@ -153,8 +156,8 @@ reactor Manager(numWorkers: usize(20), gridSize: u32(30), priorities: u32(30)) {
                     for node in nodes.unwrap() {
                         self.nodesToVisit.push_back(*node);
                     }
-                });  
-            }           
+                });
+            }
         }
     =}
 }
@@ -164,74 +167,74 @@ reactor Worker(bank_index: usize(0), threshold: u32(1024)) {
     state threshold(threshold);
     state grid: Arc<RwLock<Grid>>;
     state rng: SmallRng({= SmallRng::seed_from_u64(0) =});
-    
+
     input start: unit;
     input gridShare: Arc<RwLock<Grid>>;
     input search: WorkMessage;
     output pathFound: unit;
     output moreNodesToVisit: VecDeque<u32>;
-    
+
     preamble {=
         use volatile::Volatile;
         use rand::rngs::SmallRng;
         use rand::{SeedableRng, RngCore};
-        
+
         use crate::guided_search::{WorkMessage, GridNode, Grid};
-        
+
         use std::collections::VecDeque;
         use std::sync::{RwLock, Arc};
-        
+
         fn busy_wait(rng: &mut SmallRng) {
             for _ in 0..100 {
                 let res = rng.next_u32();
-                
+
                 // defeat dead code elimination
                 let v = Volatile::new(&res);
                 let _ = v.read();
             }
         }
     =}
-    
+
     reaction(start) {=
         self.rng = SmallRng::seed_from_u64(123456);
     =}
-    
+
     reaction(gridShare) {=
         ctx.use_ref(gridShare, |grid| {
-            self.grid = grid.unwrap().clone();    
+            self.grid = grid.unwrap().clone();
         });
     =}
-    
+
     reaction(search) -> pathFound, moreNodesToVisit {=
         let work_message = ctx.get(search).unwrap();
         let target_node_id = work_message.target_id;
         let current_node_id = work_message.node_id;
-    
-        {   
+
+        {
             let gr = self.grid.read().unwrap();
             info!("Worker {}: search path from {} to {}", self.bank_index, gr.get_node(current_node_id), gr.get_node(target_node_id));
         }
-        
+
         let mut work_queue = VecDeque::new();
         work_queue.push_back(current_node_id);
-        
+
         // start the search, but visit at most threshold nodes
         let mut nodes_processed = 0;
         while !work_queue.is_empty() && nodes_processed < self.threshold {
             nodes_processed += 1;
             busy_wait(&mut self.rng);
-            
+
             let loop_node_id = work_queue.pop_front().unwrap();
             let loop_node_neighbor_ids = {
                 let gr = self.grid.read().unwrap();
                 gr.get_node(loop_node_id).get_neighbor_ids().to_vec()
             };
-            
+
             let mut gw = self.grid.write().unwrap();
             for loop_neighbor_id in loop_node_neighbor_ids {
                 let loop_neighbor = gw.get_node_mut(loop_neighbor_id);
                 let success = loop_neighbor.set_parent(loop_node_id);
-                
+
                 if success {
                     if loop_neighbor_id == target_node_id {
                         ctx.set(pathFound, ());
@@ -242,10 +245,10 @@ reactor Worker(bank_index: usize(0), threshold: u32(1024)) {
                 }
             }
         }
-        
+
         if !work_queue.is_empty() {
             ctx.set(moreNodesToVisit, work_queue);
-        } 
+        }
         // Otherwise (if the queue is empty) we have hit a dead end
     =}
 }
@@ -256,12 +259,12 @@ main reactor (numIterations: usize(12), threshold: u32(1024), gridSize: u32(30),
     state grid_size(gridSize);
     state priorities(priorities);
     state num_workers(numWorkers);
-    
+
     manager = new Manager(numWorkers=numWorkers, gridSize=gridSize, priorities=priorities);
     runner = new BenchmarkRunner(num_iterations=numIterations);
     workers = new[numWorkers] Worker(threshold=threshold);
-    
-    reaction(startup) {=       
+
+    reaction(startup) {=
         print_benchmark_info("GuidedSearchBenchmark");
         print_args!(
             "numIterations",
@@ -280,12 +283,12 @@ main reactor (numIterations: usize(12), threshold: u32(1024), gridSize: u32(30),
 
     (runner.start)+ -> manager.start, workers.start;
     manager.finished -> runner.finished;
-    
+
     (manager.gridShare)+ -> workers.gridShare;
     manager.search -> workers.search;
     workers.pathFound -> manager.pathFound;
     workers.moreNodesToVisit -> manager.moreNodesToVisit;
-    
+
     preamble {=
         use crate::{print_args,reactors::benchmark_runner::{print_system_info, print_benchmark_info}};
     =}
